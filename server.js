@@ -6,6 +6,9 @@ const path = require('path');
 const express = require('express');
 const QRCode = require('qrcode');
 const { db, DATA_DIR } = require('./lib/db');
+const { hashPin, verifyPin, randomPin } = require('./lib/auth');
+const line = require('./lib/line');
+const notify = require('./lib/notify');
 
 const PORT = Number(process.env.PORT || 3000);
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
@@ -21,7 +24,8 @@ if (!fs.existsSync(secretFile)) {
 const SERVER_SECRET = Buffer.from(fs.readFileSync(secretFile, 'utf8').trim(), 'hex');
 
 const app = express();
-app.use(express.json());
+// 保留原始 body 供 LINE webhook 簽章驗證
+app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/vendor/html5-qrcode.min.js', (req, res) =>
   res.sendFile(path.join(__dirname, 'node_modules/html5-qrcode/html5-qrcode.min.js')));
@@ -29,20 +33,6 @@ app.get('/vendor/html5-qrcode.min.js', (req, res) =>
 // ---------- 工具 ----------
 const nowIso = () => new Date().toISOString();
 const b64u = (buf) => Buffer.from(buf).toString('base64url');
-
-function hashPin(pin, salt = crypto.randomBytes(16).toString('hex')) {
-  const h = crypto.scryptSync(String(pin), salt, 32).toString('hex');
-  return `${salt}:${h}`;
-}
-function verifyPin(pin, stored) {
-  const [salt, h] = String(stored).split(':');
-  if (!salt || !h) return false;
-  const calc = crypto.scryptSync(String(pin), salt, 32).toString('hex');
-  return crypto.timingSafeEqual(Buffer.from(h, 'hex'), Buffer.from(calc, 'hex'));
-}
-function randomPin() {
-  return String(crypto.randomInt(0, 1000000)).padStart(6, '0');
-}
 
 function createSession(kind, personId = null) {
   const token = b64u(crypto.randomBytes(24));
@@ -150,13 +140,17 @@ app.post('/api/scan', requireAdmin, (req, res) => {
   }
 
   const scannedAt = nowIso();
+  const stationName = String(station || '').slice(0, 100);
   db.prepare(`INSERT INTO records (person_id, action, station, lat, lng, scanned_at)
               VALUES (?, ?, ?, ?, ?, ?)`)
-    .run(person.id, action,
-         String(station || '').slice(0, 100),
+    .run(person.id, action, stationName,
          Number.isFinite(Number(lat)) ? Number(lat) : null,
          Number.isFinite(Number(lng)) ? Number(lng) : null,
          scannedAt);
+
+  // 非同步發送 LINE 簽到退通知，不影響掃描回應速度
+  notify.notifyScan(person, action, stationName, scannedAt)
+    .catch((e) => console.error('LINE 通知失敗:', e));
 
   res.json({
     ok: true, action, scanned_at: scannedAt,
@@ -176,8 +170,28 @@ app.post('/api/admin/login', (req, res) => {
 });
 
 app.get('/api/admin/persons', requireAdmin, (req, res) => {
-  const rows = db.prepare(`SELECT id, emp_no, name, dept, active, created_at FROM persons ORDER BY emp_no`).all();
+  const rows = db.prepare(
+    `SELECT id, emp_no, name, dept, active, created_at,
+            (line_user_id IS NOT NULL) AS line_bound
+     FROM persons ORDER BY emp_no`).all();
   res.json({ persons: rows });
+});
+
+app.post('/api/admin/persons/:id/unbind-line', requireAdmin, (req, res) => {
+  const info = db.prepare(`UPDATE persons SET line_user_id = NULL WHERE id = ?`).run(req.params.id);
+  if (!info.changes) return res.status(404).json({ error: '查無此人員' });
+  res.json({ ok: true });
+});
+
+// ---------- LINE Webhook（好友加入、綁定指令）----------
+app.post('/api/line/webhook', (req, res) => {
+  if (!line.verifySignature(req.rawBody, req.get('x-line-signature'))) {
+    return res.status(403).send('signature verification failed');
+  }
+  res.sendStatus(200);
+  for (const ev of (req.body && req.body.events) || []) {
+    notify.handleLineEvent(ev).catch((e) => console.error('LINE 事件處理失敗:', e));
+  }
 });
 
 app.post('/api/admin/persons', requireAdmin, (req, res) => {
@@ -250,5 +264,6 @@ app.use((err, req, res, next) => {
 
 if (require.main === module) {
   app.listen(PORT, () => console.log(`簽到退系統已啟動： http://localhost:${PORT}`));
+  notify.startScheduler();
 }
 module.exports = app;

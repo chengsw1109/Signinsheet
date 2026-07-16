@@ -34,7 +34,7 @@
       <h2>人員清單</h2>
       <div class="table-scroll">
         <table>
-          <thead><tr><th>工號</th><th>姓名</th><th>部門</th><th>狀態</th><th>操作</th></tr></thead>
+          <thead><tr><th>工號</th><th>姓名</th><th>部門</th><th>狀態</th><th>LINE</th><th>操作</th></tr></thead>
           <tbody id="persons-body"></tbody>
         </table>
       </div>
@@ -121,13 +121,15 @@ async function loadPersons() {
       <td>${escapeHtml(p.name)}</td>
       <td>${escapeHtml(p.dept || '-')}</td>
       <td><span class="badge ${p.active ? 'in' : 'off'}">${p.active ? '啟用' : '停用'}</span></td>
+      <td><span class="badge ${p.line_bound ? 'in' : 'off'}">${p.line_bound ? '已綁定' : '未綁定'}</span></td>
       <td>
         <button class="small" onclick="resetPin(${p.id}, '${escapeHtml(p.name)}')">重設 PIN</button>
         <button class="small ${p.active ? 'danger' : ''}" onclick="toggleActive(${p.id}, ${p.active ? 0 : 1})">
           ${p.active ? '停用' : '啟用'}
         </button>
+        ${p.line_bound ? `<button class="small secondary" onclick="unbindLine(${p.id}, '${escapeHtml(p.name)}')">解綁 LINE</button>` : ''}
       </td>
-    </tr>`).join('') || '<tr><td colspan="5" class="muted">尚無人員，請先新增</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="6" class="muted">尚無人員，請先新增</td></tr>';
 }
 
 $('add-btn').onclick = async () => {
@@ -159,6 +161,17 @@ window.resetPin = async (id, name) => {
   } catch (e) {
     el.className = 'msg err';
     el.textContent = e.message;
+  }
+};
+
+window.unbindLine = async (id, name) => {
+  if (!confirm(`確定要解除「${name}」的 LINE 綁定？`)) return;
+  try {
+    await api(`/api/admin/persons/${id}/unbind-line`, { method: 'POST' });
+    loadPersons();
+  } catch (e) {
+    $('person-msg').className = 'msg err';
+    $('person-msg').textContent = e.message;
   }
 };
 
