@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>管理後台</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap wide">
+  <h1>管理後台</h1>
+
+  <div id="login-card" class="card">
+    <h2>管理員登入</h2>
+    <label>管理員密碼</label>
+    <input id="password" type="password">
+    <button id="login-btn">登入</button>
+    <div id="login-msg" class="msg err"></div>
+  </div>
+
+  <div id="main" class="hidden">
+    <div class="card">
+      <h2>新增人員</h2>
+      <div class="row">
+        <div><label>工號 *</label><input id="new-emp"></div>
+        <div><label>姓名 *</label><input id="new-name"></div>
+        <div><label>部門</label><input id="new-dept"></div>
+        <div><button id="add-btn">新增</button></div>
+      </div>
+      <div id="add-msg" class="msg"></div>
+    </div>
+
+    <div class="card">
+      <h2>人員清單</h2>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>工號</th><th>姓名</th><th>部門</th><th>狀態</th><th>操作</th></tr></thead>
+          <tbody id="persons-body"></tbody>
+        </table>
+      </div>
+      <div id="person-msg" class="msg"></div>
+    </div>
+
+    <div class="card">
+      <h2>簽到退記錄</h2>
+      <div class="row">
+        <div><label>起始日期</label><input id="from" type="date"></div>
+        <div><label>結束日期</label><input id="to" type="date"></div>
+        <div><label>姓名／工號</label><input id="q" placeholder="關鍵字"></div>
+        <div><button id="query-btn">查詢</button></div>
+        <div><button id="csv-btn" class="secondary">匯出 CSV</button></div>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>時間</th><th>工號</th><th>姓名</th><th>部門</th><th>動作</th><th>站點</th><th>位置</th></tr></thead>
+          <tbody id="records-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <p class="center"><a href="/">回首頁</a></p>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let session = sessionStorage.getItem('admin_session');
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(session ? { Authorization: 'Bearer ' + session } : {}),
+    },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) {
+    sessionStorage.removeItem('admin_session');
+    session = null;
+    $('main').classList.add('hidden');
+    $('login-card').classList.remove('hidden');
+    throw new Error(data.error || '請重新登入');
+  }
+  if (!res.ok) throw new Error(data.error || '發生錯誤');
+  return data;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+$('login-btn').onclick = async () => {
+  $('login-msg').textContent = '';
+  try {
+    const data = await api('/api/admin/login', {
+      method: 'POST',
+      body: JSON.stringify({ password: $('password').value }),
+    });
+    session = data.session;
+    sessionStorage.setItem('admin_session', session);
+    showMain();
+  } catch (e) {
+    $('login-msg').textContent = e.message;
+  }
+};
+$('password').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('login-btn').click(); });
+
+function showMain() {
+  $('login-card').classList.add('hidden');
+  $('main').classList.remove('hidden');
+  loadPersons();
+  loadRecords();
+}
+
+async function loadPersons() {
+  const { persons } = await api('/api/admin/persons');
+  $('persons-body').innerHTML = persons.map(p => `
+    <tr>
+      <td>${escapeHtml(p.emp_no)}</td>
+      <td>${escapeHtml(p.name)}</td>
+      <td>${escapeHtml(p.dept || '-')}</td>
+      <td><span class="badge ${p.active ? 'in' : 'off'}">${p.active ? '啟用' : '停用'}</span></td>
+      <td>
+        <button class="small" onclick="resetPin(${p.id}, '${escapeHtml(p.name)}')">重設 PIN</button>
+        <button class="small ${p.active ? 'danger' : ''}" onclick="toggleActive(${p.id}, ${p.active ? 0 : 1})">
+          ${p.active ? '停用' : '啟用'}
+        </button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="5" class="muted">尚無人員，請先新增</td></tr>';
+}
+
+$('add-btn').onclick = async () => {
+  const el = $('add-msg');
+  el.className = 'msg';
+  el.textContent = '';
+  try {
+    const data = await api('/api/admin/persons', {
+      method: 'POST',
+      body: JSON.stringify({ emp_no: $('new-emp').value, name: $('new-name').value, dept: $('new-dept').value }),
+    });
+    el.className = 'msg ok';
+    el.textContent = `新增成功！初始 PIN 碼：${data.pin}（僅顯示這一次，請轉交給本人）`;
+    $('new-emp').value = $('new-name').value = $('new-dept').value = '';
+    loadPersons();
+  } catch (e) {
+    el.className = 'msg err';
+    el.textContent = e.message;
+  }
+};
+
+window.resetPin = async (id, name) => {
+  if (!confirm(`確定要重設「${name}」的 PIN 碼？`)) return;
+  const el = $('person-msg');
+  try {
+    const data = await api(`/api/admin/persons/${id}/reset-pin`, { method: 'POST' });
+    el.className = 'msg ok';
+    el.textContent = `「${name}」的新 PIN 碼：${data.pin}（僅顯示這一次）`;
+  } catch (e) {
+    el.className = 'msg err';
+    el.textContent = e.message;
+  }
+};
+
+window.toggleActive = async (id, active) => {
+  try {
+    await api(`/api/admin/persons/${id}/active`, { method: 'POST', body: JSON.stringify({ active }) });
+    loadPersons();
+  } catch (e) {
+    $('person-msg').className = 'msg err';
+    $('person-msg').textContent = e.message;
+  }
+};
+
+function recordQuery() {
+  const p = new URLSearchParams();
+  if ($('from').value) p.set('from', $('from').value);
+  if ($('to').value) p.set('to', $('to').value);
+  if ($('q').value.trim()) p.set('q', $('q').value.trim());
+  return p;
+}
+
+async function loadRecords() {
+  const { records } = await api('/api/admin/records?' + recordQuery());
+  $('records-body').innerHTML = records.map(r => `
+    <tr>
+      <td>${new Date(r.scanned_at).toLocaleString('zh-TW')}</td>
+      <td>${escapeHtml(r.emp_no)}</td>
+      <td>${escapeHtml(r.name)}</td>
+      <td>${escapeHtml(r.dept || '-')}</td>
+      <td><span class="badge ${r.action}">${r.action === 'in' ? '簽到' : '簽退'}</span></td>
+      <td>${escapeHtml(r.station || '-')}</td>
+      <td>${r.lat != null ? `<a href="https://maps.google.com/?q=${r.lat},${r.lng}" target="_blank">${r.lat.toFixed(5)}, ${r.lng.toFixed(5)}</a>` : '-'}</td>
+    </tr>`).join('') || '<tr><td colspan="7" class="muted">查無記錄</td></tr>';
+}
+
+$('query-btn').onclick = loadRecords;
+$('csv-btn').onclick = () => {
+  const p = recordQuery();
+  p.set('session', session);
+  location.href = '/api/admin/records.csv?' + p;
+};
+
+if (session) showMain();
+</script>
+</body>
+</html>

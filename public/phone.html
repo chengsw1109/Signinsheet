@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>我的動態條碼</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+  <h1>我的動態條碼</h1>
+
+  <div id="login-card" class="card">
+    <h2>員工登入</h2>
+    <label>工號</label>
+    <input id="emp_no" autocomplete="username" placeholder="例：A001">
+    <label>PIN 碼</label>
+    <input id="pin" type="password" inputmode="numeric" autocomplete="current-password" placeholder="6 位數字">
+    <button id="login-btn">登入</button>
+    <div id="login-msg" class="msg err"></div>
+  </div>
+
+  <div id="qr-card" class="card hidden">
+    <div class="center">
+      <h2 id="who"></h2>
+      <div class="muted" id="who-dept"></div>
+    </div>
+    <div class="qr-box"><img id="qr-img" alt="動態 QR Code"></div>
+    <div class="center countdown">條碼每 30 秒自動更新，<span id="left"></span> 秒後失效</div>
+    <div class="center muted">請將此畫面出示給掃描站</div>
+    <button id="logout-btn" class="secondary">登出</button>
+  </div>
+
+  <div id="rec-card" class="card hidden">
+    <h2>我的最近記錄</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>動作</th><th>站點</th><th>時間</th></tr></thead>
+        <tbody id="rec-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <p class="center"><a href="/">回首頁</a></p>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let session = sessionStorage.getItem('phone_session');
+let qrTimer = null, cdTimer = null;
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(session ? { Authorization: 'Bearer ' + session } : {}),
+      ...(opts.headers || {}),
+    },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || '發生錯誤');
+  return data;
+}
+
+async function refreshQr() {
+  try {
+    const { qr, ttl_ms } = await api('/api/phone/qr');
+    $('qr-img').src = qr;
+    let left = Math.floor(ttl_ms / 1000);
+    clearInterval(cdTimer);
+    $('left').textContent = left;
+    cdTimer = setInterval(() => {
+      left -= 1;
+      $('left').textContent = Math.max(left, 0);
+    }, 1000);
+  } catch (e) {
+    if (String(e.message).includes('登入')) return logout();
+  }
+}
+
+async function loadRecords() {
+  try {
+    const { records } = await api('/api/phone/records');
+    $('rec-body').innerHTML = records.map(r => `
+      <tr>
+        <td><span class="badge ${r.action}">${r.action === 'in' ? '簽到' : '簽退'}</span></td>
+        <td>${escapeHtml(r.station || '-')}</td>
+        <td>${new Date(r.scanned_at).toLocaleString('zh-TW')}</td>
+      </tr>`).join('') || '<tr><td colspan="3" class="muted">尚無記錄</td></tr>';
+  } catch {}
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+function showQr(person) {
+  $('login-card').classList.add('hidden');
+  $('qr-card').classList.remove('hidden');
+  $('rec-card').classList.remove('hidden');
+  if (person) {
+    $('who').textContent = `${person.name}（${person.emp_no}）`;
+    $('who-dept').textContent = person.dept || '';
+    sessionStorage.setItem('phone_person', JSON.stringify(person));
+  }
+  refreshQr();
+  loadRecords();
+  clearInterval(qrTimer);
+  qrTimer = setInterval(refreshQr, 30000);
+}
+
+function logout() {
+  session = null;
+  sessionStorage.removeItem('phone_session');
+  sessionStorage.removeItem('phone_person');
+  clearInterval(qrTimer);
+  clearInterval(cdTimer);
+  $('qr-card').classList.add('hidden');
+  $('rec-card').classList.add('hidden');
+  $('login-card').classList.remove('hidden');
+}
+
+$('login-btn').onclick = async () => {
+  $('login-msg').textContent = '';
+  try {
+    const data = await api('/api/phone/login', {
+      method: 'POST',
+      body: JSON.stringify({ emp_no: $('emp_no').value, pin: $('pin').value }),
+    });
+    session = data.session;
+    sessionStorage.setItem('phone_session', session);
+    showQr(data.person);
+  } catch (e) {
+    $('login-msg').textContent = e.message;
+  }
+};
+$('pin').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('login-btn').click(); });
+$('logout-btn').onclick = logout;
+
+if (session) {
+  const person = JSON.parse(sessionStorage.getItem('phone_person') || 'null');
+  showQr(person);
+}
+</script>
+</body>
+</html>

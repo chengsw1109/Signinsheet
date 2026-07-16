@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>掃描站</title>
+<link rel="stylesheet" href="/style.css">
+<script src="/vendor/html5-qrcode.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <h1>掃描站</h1>
+
+  <div id="login-card" class="card">
+    <h2>管理員登入</h2>
+    <label>管理員密碼</label>
+    <input id="password" type="password">
+    <button id="login-btn">登入</button>
+    <div id="login-msg" class="msg err"></div>
+  </div>
+
+  <div id="setup-card" class="card hidden">
+    <h2>站點設定</h2>
+    <div class="row">
+      <div>
+        <label>站點名稱</label>
+        <input id="station" placeholder="例：一樓大門">
+      </div>
+      <div>
+        <label>模式</label>
+        <select id="mode">
+          <option value="auto">自動判斷（簽到／簽退）</option>
+          <option value="in">固定為簽到</option>
+          <option value="out">固定為簽退</option>
+        </select>
+      </div>
+    </div>
+    <div class="muted" id="geo-status">📍 正在取得定位…</div>
+    <button id="start-btn">開始掃描</button>
+    <button id="stop-btn" class="secondary hidden">停止掃描</button>
+  </div>
+
+  <div id="scan-card" class="card hidden">
+    <div id="reader"></div>
+    <div id="result" class="scan-result hidden"></div>
+  </div>
+
+  <p class="center"><a href="/">回首頁</a></p>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let session = sessionStorage.getItem('admin_session');
+let scanner = null;
+let geo = { lat: null, lng: null };
+let busy = false;
+let lastToken = '';
+
+navigator.geolocation?.getCurrentPosition(
+  (p) => {
+    geo = { lat: p.coords.latitude, lng: p.coords.longitude };
+    $('geo-status').textContent = `📍 已取得定位：${geo.lat.toFixed(5)}, ${geo.lng.toFixed(5)}`;
+  },
+  () => { $('geo-status').textContent = '📍 無法取得定位，記錄將不含 GPS 座標（仍會記錄站點名稱與時間）'; },
+  { enableHighAccuracy: true, timeout: 10000 }
+);
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(session ? { Authorization: 'Bearer ' + session } : {}),
+    },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || '發生錯誤');
+  return data;
+}
+
+$('login-btn').onclick = async () => {
+  $('login-msg').textContent = '';
+  try {
+    const data = await api('/api/admin/login', {
+      method: 'POST',
+      body: JSON.stringify({ password: $('password').value }),
+    });
+    session = data.session;
+    sessionStorage.setItem('admin_session', session);
+    showSetup();
+  } catch (e) {
+    $('login-msg').textContent = e.message;
+  }
+};
+$('password').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('login-btn').click(); });
+
+function showSetup() {
+  $('login-card').classList.add('hidden');
+  $('setup-card').classList.remove('hidden');
+  $('station').value = localStorage.getItem('station_name') || '';
+}
+
+function showResult(ok, html) {
+  const el = $('result');
+  el.className = 'scan-result ' + (ok ? 'ok' : 'err');
+  el.innerHTML = html;
+  el.classList.remove('hidden');
+}
+
+async function onScan(text) {
+  if (busy || text === lastToken) return;   // 防止同一條碼連續觸發
+  busy = true;
+  lastToken = text;
+  try {
+    const data = await api('/api/scan', {
+      method: 'POST',
+      body: JSON.stringify({
+        token: text,
+        station: $('station').value.trim(),
+        lat: geo.lat, lng: geo.lng,
+        mode: $('mode').value,
+      }),
+    });
+    const label = data.action === 'in' ? '✅ 簽到成功' : '👋 簽退成功';
+    showResult(true, `<strong>${label}</strong><br>
+      ${escapeHtml(data.person.name)}（${escapeHtml(data.person.emp_no)}）${escapeHtml(data.person.dept || '')}<br>
+      <span class="muted">${new Date(data.scanned_at).toLocaleString('zh-TW')}</span>`);
+  } catch (e) {
+    if (String(e.message).includes('管理員')) {
+      sessionStorage.removeItem('admin_session');
+      location.reload();
+      return;
+    }
+    showResult(false, `❌ ${escapeHtml(e.message)}`);
+  } finally {
+    setTimeout(() => { busy = false; }, 1500);  // 每次掃描間隔 1.5 秒
+    setTimeout(() => { lastToken = ''; }, 5000);
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+$('start-btn').onclick = async () => {
+  localStorage.setItem('station_name', $('station').value.trim());
+  $('scan-card').classList.remove('hidden');
+  $('start-btn').classList.add('hidden');
+  $('stop-btn').classList.remove('hidden');
+  scanner = new Html5Qrcode('reader');
+  try {
+    await scanner.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: { width: 250, height: 250 } },
+      onScan,
+      () => {}
+    );
+  } catch (e) {
+    showResult(false, '無法開啟相機：' + escapeHtml(e.message || e) + '<br>請確認已允許相機權限，且使用 HTTPS 或 localhost。');
+  }
+};
+
+$('stop-btn').onclick = async () => {
+  if (scanner) { try { await scanner.stop(); } catch {} scanner = null; }
+  $('scan-card').classList.add('hidden');
+  $('stop-btn').classList.add('hidden');
+  $('start-btn').classList.remove('hidden');
+};
+
+if (session) showSetup();
+</script>
+</body>
+</html>
