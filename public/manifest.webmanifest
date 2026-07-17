@@ -1,0 +1,14 @@
+{
+  "name": "人員簽到退系統",
+  "short_name": "簽到退",
+  "description": "出示動態條碼完成簽到退",
+  "start_url": "/phone.html",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f6f9",
+  "theme_color": "#2563eb",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
