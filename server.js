@@ -1,5 +1,7 @@
 'use strict';
 
+require('./lib/env'); // 載入 .env（必須在其他模組讀取環境變數前執行）
+
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
