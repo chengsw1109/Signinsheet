@@ -9,6 +9,7 @@ const { db, DATA_DIR } = require('./lib/db');
 const { hashPin, verifyPin, randomPin } = require('./lib/auth');
 const line = require('./lib/line');
 const notify = require('./lib/notify');
+const stats = require('./lib/stats');
 
 const PORT = Number(process.env.PORT || 3000);
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
@@ -239,6 +240,33 @@ function queryRecords(q) {
 
 app.get('/api/admin/records', requireAdmin, (req, res) => {
   res.json({ records: queryRecords(req.query) });
+});
+
+// ---------- 出勤統計 ----------
+app.get('/api/admin/stats/daily', requireAdmin, (req, res) => {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : stats.localNow().date;
+  res.json({ date, work_start: stats.WORK_START, rows: stats.dailyDetail(date) });
+});
+
+app.get('/api/admin/stats/monthly', requireAdmin, (req, res) => {
+  const month = /^\d{4}-\d{2}$/.test(req.query.month || '') ? req.query.month : stats.localNow().date.slice(0, 7);
+  res.json(stats.monthlyReport(month));
+});
+
+app.get('/api/admin/stats/monthly.csv', (req, res) => {
+  const s = db.prepare(`SELECT * FROM sessions WHERE token = ? AND kind = 'admin'`).get(req.query.session || '');
+  if (!s || s.expires_at < nowIso()) return res.status(401).send('unauthorized');
+  const month = /^\d{4}-\d{2}$/.test(req.query.month || '') ? req.query.month : stats.localNow().date.slice(0, 7);
+  const report = stats.monthlyReport(month);
+  const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const lines = [`月份,${month},已過工作日,${report.workdays_elapsed}`, '工號,姓名,部門,出勤天數,遲到次數,缺勤工作日,總工時(小時)'];
+  for (const r of report.rows) {
+    lines.push([r.emp_no, r.name, r.dept, r.attend_days, r.late_count,
+      r.absent_workdays, (r.total_minutes / 60).toFixed(1)].map(esc).join(','));
+  }
+  res.set('Content-Type', 'text/csv; charset=utf-8');
+  res.set('Content-Disposition', `attachment; filename="attendance-${month}.csv"`);
+  res.send('\ufeff' + lines.join('\r\n'));
 });
 
 app.get('/api/admin/records.csv', (req, res) => {

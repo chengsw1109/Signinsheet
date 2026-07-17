@@ -42,6 +42,33 @@
     </div>
 
     <div class="card">
+      <h2>出勤統計</h2>
+      <div class="row">
+        <div><label>日統計日期</label><input id="stat-date" type="date"></div>
+        <div><button id="stat-daily-btn">查詢日統計</button></div>
+        <div><label>月報表月份</label><input id="stat-month" type="month"></div>
+        <div><button id="stat-month-btn">查詢月報表</button></div>
+        <div><button id="stat-csv-btn" class="secondary">匯出月報 CSV</button></div>
+      </div>
+
+      <h2 id="stat-daily-title" class="hidden"></h2>
+      <div class="table-scroll">
+        <table id="stat-daily-table" class="hidden">
+          <thead><tr><th>工號</th><th>姓名</th><th>部門</th><th>簽到</th><th>簽退</th><th>工時</th><th>狀態</th></tr></thead>
+          <tbody id="stat-daily-body"></tbody>
+        </table>
+      </div>
+
+      <h2 id="stat-month-title" class="hidden"></h2>
+      <div class="table-scroll">
+        <table id="stat-month-table" class="hidden">
+          <thead><tr><th>工號</th><th>姓名</th><th>部門</th><th>出勤天數</th><th>遲到次數</th><th>缺勤工作日</th><th>總工時</th></tr></thead>
+          <tbody id="stat-month-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>簽到退記錄</h2>
       <div class="row">
         <div><label>起始日期</label><input id="from" type="date"></div>
@@ -109,9 +136,62 @@ $('password').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('log
 function showMain() {
   $('login-card').classList.add('hidden');
   $('main').classList.remove('hidden');
+  const now = new Date();
+  $('stat-date').value = now.toLocaleDateString('sv-SE');
+  $('stat-month').value = now.toLocaleDateString('sv-SE').slice(0, 7);
   loadPersons();
   loadRecords();
+  loadDailyStats();
 }
+
+const fmtHM = (min) => min == null ? '-' : `${Math.floor(min / 60)} 時 ${min % 60} 分`;
+const fmtClock = (iso) => iso ? new Date(iso).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false }) : '-';
+const STATUS_BADGE = {
+  done: '<span class="badge in">完成</span>',
+  no_out: '<span class="badge out">未簽退</span>',
+  absent: '<span class="badge off">未簽到</span>',
+};
+
+async function loadDailyStats() {
+  const { date, rows } = await api('/api/admin/stats/daily?date=' + ($('stat-date').value || ''));
+  $('stat-daily-title').textContent = `日統計 ${date}`;
+  $('stat-daily-title').classList.remove('hidden');
+  $('stat-daily-table').classList.remove('hidden');
+  $('stat-daily-body').innerHTML = rows.map(r => `
+    <tr>
+      <td>${escapeHtml(r.emp_no)}</td>
+      <td>${escapeHtml(r.name)}</td>
+      <td>${escapeHtml(r.dept || '-')}</td>
+      <td>${fmtClock(r.first_in)}${r.late ? ' <span class="badge out">遲到</span>' : ''}</td>
+      <td>${fmtClock(r.last_out)}</td>
+      <td>${fmtHM(r.work_minutes)}</td>
+      <td>${STATUS_BADGE[r.status] || '-'}</td>
+    </tr>`).join('') || '<tr><td colspan="7" class="muted">尚無人員</td></tr>';
+}
+
+async function loadMonthlyStats() {
+  const data = await api('/api/admin/stats/monthly?month=' + ($('stat-month').value || ''));
+  $('stat-month-title').textContent = `月報表 ${data.month}（已過工作日 ${data.workdays_elapsed} 天）`;
+  $('stat-month-title').classList.remove('hidden');
+  $('stat-month-table').classList.remove('hidden');
+  $('stat-month-body').innerHTML = data.rows.map(r => `
+    <tr>
+      <td>${escapeHtml(r.emp_no)}</td>
+      <td>${escapeHtml(r.name)}</td>
+      <td>${escapeHtml(r.dept || '-')}</td>
+      <td>${r.attend_days}</td>
+      <td>${r.late_count}</td>
+      <td>${r.absent_workdays}</td>
+      <td>${fmtHM(r.total_minutes)}</td>
+    </tr>`).join('') || '<tr><td colspan="7" class="muted">尚無人員</td></tr>';
+}
+
+$('stat-daily-btn').onclick = loadDailyStats;
+$('stat-month-btn').onclick = loadMonthlyStats;
+$('stat-csv-btn').onclick = () => {
+  const p = new URLSearchParams({ month: $('stat-month').value || '', session });
+  location.href = '/api/admin/stats/monthly.csv?' + p;
+};
 
 async function loadPersons() {
   const { persons } = await api('/api/admin/persons');
