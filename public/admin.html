@@ -48,6 +48,16 @@
     </div>
 
     <div class="card">
+      <h2>資料庫備份</h2>
+      <div class="row">
+        <div><button id="backup-now-btn">立即備份</button></div>
+        <div><button id="backup-dl-btn" class="secondary">下載最新備份</button></div>
+      </div>
+      <div id="backup-info" class="muted"></div>
+      <div id="backup-msg" class="msg"></div>
+    </div>
+
+    <div class="card">
       <h2>出勤統計</h2>
       <div class="row">
         <div><label>姓名／工號（留空＝全部人員）</label><input id="stat-q" placeholder="例：王小明 或 A001"></div>
@@ -149,7 +159,38 @@ function showMain() {
   loadPersons();
   loadRecords();
   loadDailyStats();
+  loadBackupStatus();
 }
+
+async function loadBackupStatus() {
+  try {
+    const s = await api('/api/admin/backups');
+    const latest = s.latest
+      ? `最新備份：${s.latest.file}（${(s.latest.size / 1024).toFixed(0)} KB，${new Date(s.latest.at).toLocaleString('zh-TW')}）`
+      : '尚無備份';
+    $('backup-info').textContent =
+      `${latest}｜共 ${s.count} 份｜每日 ${s.schedule_time} 自動備份，保留 ${s.keep_days} 天`;
+  } catch {}
+}
+
+$('backup-now-btn').onclick = async () => {
+  const el = $('backup-msg');
+  el.className = 'msg';
+  el.textContent = '備份中…';
+  try {
+    const r = await api('/api/admin/backup', { method: 'POST' });
+    el.className = 'msg ok';
+    el.textContent = `✅ 備份完成：${r.file}`;
+    loadBackupStatus();
+  } catch (e) {
+    el.className = 'msg err';
+    el.textContent = e.message;
+  }
+};
+
+$('backup-dl-btn').onclick = () => {
+  location.href = '/api/admin/backup/download?session=' + encodeURIComponent(session);
+};
 
 const fmtHM = (min) => min == null ? '-' : `${Math.floor(min / 60)} 時 ${min % 60} 分`;
 const fmtClock = (iso) => iso ? new Date(iso).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false }) : '-';

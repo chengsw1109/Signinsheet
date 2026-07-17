@@ -12,6 +12,7 @@ const { hashPin, verifyPin, randomPin } = require('./lib/auth');
 const line = require('./lib/line');
 const notify = require('./lib/notify');
 const stats = require('./lib/stats');
+const backup = require('./lib/backup');
 
 const PORT = Number(process.env.PORT || 3000);
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
@@ -249,6 +250,23 @@ app.get('/api/admin/records', requireAdmin, (req, res) => {
   res.json({ records: queryRecords(req.query) });
 });
 
+// ---------- 資料庫備份 ----------
+app.get('/api/admin/backups', requireAdmin, (req, res) => {
+  res.json(backup.backupStatus());
+});
+
+app.post('/api/admin/backup', requireAdmin, async (req, res) => {
+  res.json(await backup.runBackup());
+});
+
+app.get('/api/admin/backup/download', (req, res) => {
+  const s = db.prepare(`SELECT * FROM sessions WHERE token = ? AND kind = 'admin'`).get(req.query.session || '');
+  if (!s || s.expires_at < nowIso()) return res.status(401).send('unauthorized');
+  const p = backup.latestBackupPath();
+  if (!p) return res.status(404).send('尚無備份，請先執行「立即備份」');
+  res.download(p);
+});
+
 // ---------- 出勤統計 ----------
 app.get('/api/admin/stats/daily', requireAdmin, (req, res) => {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : stats.localNow().date;
@@ -302,5 +320,6 @@ if (require.main === module) {
   app.listen(PORT, () => console.log(`簽到退系統已啟動： http://localhost:${PORT}`));
   console.log(`LINE 金鑰狀態：ACCESS_TOKEN ${process.env.LINE_CHANNEL_ACCESS_TOKEN ? '✅ 已設定' : '❌ 未設定'}、CHANNEL_SECRET ${process.env.LINE_CHANNEL_SECRET ? '✅ 已設定' : '❌ 未設定'}${fs.existsSync(path.join(__dirname, '.env')) ? '' : '（找不到 .env 檔）'}`);
   notify.startScheduler();
+  backup.startScheduler();
 }
 module.exports = app;
