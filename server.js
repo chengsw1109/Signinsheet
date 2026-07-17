@@ -262,10 +262,39 @@ app.post('/api/admin/backup', requireAdmin, async (req, res) => {
 app.get('/api/admin/backup/download', (req, res) => {
   const s = db.prepare(`SELECT * FROM sessions WHERE token = ? AND kind = 'admin'`).get(req.query.session || '');
   if (!s || s.expires_at < nowIso()) return res.status(401).send('unauthorized');
-  const p = backup.latestBackupPath();
-  if (!p) return res.status(404).send('尚無備份，請先執行「立即備份」');
+  const p = req.query.file ? backup.resolveBackupFile(req.query.file) : backup.latestBackupPath();
+  if (!p) return res.status(404).send('找不到備份檔，請先執行「立即備份」');
   res.download(p);
 });
+
+app.get('/api/admin/backup/list', requireAdmin, (req, res) => {
+  res.json({ backups: backup.listBackups() });
+});
+
+app.post('/api/admin/backup/restore', requireAdmin, async (req, res) => {
+  try {
+    res.json(await backup.restoreBackup((req.body || {}).file));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/admin/backup/delete', requireAdmin, (req, res) => {
+  try {
+    res.json(backup.deleteBackup((req.body || {}).file));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/admin/backup/upload', requireAdmin,
+  express.raw({ type: () => true, limit: '200mb' }),
+  (req, res) => {
+    if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: '未收到檔案' });
+    const result = backup.saveUploadedBackup(req.body);
+    if (result.error) return res.status(400).json({ error: result.error });
+    res.json(result);
+  });
 
 // ---------- 出勤統計 ----------
 app.get('/api/admin/stats/daily', requireAdmin, (req, res) => {

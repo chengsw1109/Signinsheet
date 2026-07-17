@@ -48,13 +48,24 @@
     </div>
 
     <div class="card">
-      <h2>資料庫備份</h2>
+      <h2>資料庫備份與還原</h2>
       <div class="row">
         <div><button id="backup-now-btn">立即備份</button></div>
         <div><button id="backup-dl-btn" class="secondary">下載最新備份</button></div>
+        <div>
+          <label>上傳備份檔還原（選擇之前下載的 .db 檔）</label>
+          <input id="backup-file" type="file" accept=".db">
+        </div>
+        <div><button id="backup-upload-btn" class="secondary">上傳</button></div>
       </div>
       <div id="backup-info" class="muted"></div>
       <div id="backup-msg" class="msg"></div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>備份檔</th><th>大小</th><th>備份時間</th><th>操作</th></tr></thead>
+          <tbody id="backup-list"></tbody>
+        </table>
+      </div>
     </div>
 
     <div class="card">
@@ -169,22 +180,83 @@ async function loadBackupStatus() {
       ? `最新備份：${s.latest.file}（${(s.latest.size / 1024).toFixed(0)} KB，${new Date(s.latest.at).toLocaleString('zh-TW')}）`
       : '尚無備份';
     $('backup-info').textContent =
-      `${latest}｜共 ${s.count} 份｜每日 ${s.schedule_time} 自動備份，保留 ${s.keep_days} 天`;
+      `${latest}｜每日 ${s.schedule_time} 自動備份，保留 ${s.keep_days} 天`;
+    const { backups } = await api('/api/admin/backup/list');
+    $('backup-list').innerHTML = backups.map(b => `
+      <tr>
+        <td>${escapeHtml(b.file)}</td>
+        <td>${(b.size / 1024).toFixed(0)} KB</td>
+        <td>${new Date(b.mtime).toLocaleString('zh-TW')}</td>
+        <td>
+          <button class="small danger" onclick="restoreBackup('${escapeHtml(b.file)}')">還原</button>
+          <button class="small" onclick="downloadBackup('${escapeHtml(b.file)}')">下載</button>
+          <button class="small secondary" onclick="deleteBackup('${escapeHtml(b.file)}')">刪除</button>
+        </td>
+      </tr>`).join('') || '<tr><td colspan="4" class="muted">尚無備份檔</td></tr>';
   } catch {}
 }
 
-$('backup-now-btn').onclick = async () => {
+function backupMsg(ok, text) {
   const el = $('backup-msg');
-  el.className = 'msg';
-  el.textContent = '備份中…';
+  el.className = 'msg ' + (ok ? 'ok' : 'err');
+  el.textContent = text;
+}
+
+window.restoreBackup = async (file) => {
+  if (!confirm(`確定要用「${file}」還原資料？\n\n目前的人員與簽到記錄將被備份內容「完全取代」。\n（系統會先自動備份現況，萬一按錯可再還原回來）`)) return;
+  if (!confirm('最後確認：真的要執行還原嗎？')) return;
+  backupMsg(true, '還原中，請稍候…');
   try {
-    const r = await api('/api/admin/backup', { method: 'POST' });
-    el.className = 'msg ok';
-    el.textContent = `✅ 備份完成：${r.file}`;
+    const r = await api('/api/admin/backup/restore', { method: 'POST', body: JSON.stringify({ file }) });
+    backupMsg(true, `✅ 還原完成：人員 ${r.persons} 筆、記錄 ${r.records} 筆（還原前現況已存為 ${r.safety}）`);
+    loadPersons(); loadRecords(); loadDailyStats(); loadBackupStatus();
+  } catch (e) {
+    backupMsg(false, e.message);
+  }
+};
+
+window.downloadBackup = (file) => {
+  location.href = `/api/admin/backup/download?file=${encodeURIComponent(file)}&session=${encodeURIComponent(session)}`;
+};
+
+window.deleteBackup = async (file) => {
+  if (!confirm(`確定要刪除備份「${file}」？`)) return;
+  try {
+    await api('/api/admin/backup/delete', { method: 'POST', body: JSON.stringify({ file }) });
     loadBackupStatus();
   } catch (e) {
-    el.className = 'msg err';
-    el.textContent = e.message;
+    backupMsg(false, e.message);
+  }
+};
+
+$('backup-upload-btn').onclick = async () => {
+  const f = $('backup-file').files[0];
+  if (!f) return backupMsg(false, '請先選擇備份檔（.db）');
+  backupMsg(true, '上傳並驗證中…');
+  try {
+    const res = await fetch('/api/admin/backup/upload', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + session, 'Content-Type': 'application/octet-stream' },
+      body: f,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || '上傳失敗');
+    backupMsg(true, `✅ 上傳成功：${data.file}（含人員 ${data.persons} 筆、記錄 ${data.records} 筆），可在下方清單按「還原」`);
+    $('backup-file').value = '';
+    loadBackupStatus();
+  } catch (e) {
+    backupMsg(false, e.message);
+  }
+};
+
+$('backup-now-btn').onclick = async () => {
+  backupMsg(true, '備份中…');
+  try {
+    const r = await api('/api/admin/backup', { method: 'POST' });
+    backupMsg(true, `✅ 備份完成：${r.file}`);
+    loadBackupStatus();
+  } catch (e) {
+    backupMsg(false, e.message);
   }
 };
 
