@@ -91,6 +91,13 @@ LINE 指令一覽（直接傳訊息給官方帳號）：
 6. 手機瀏覽器開 `https://您的網域.ngrok-free.app` 即可使用；LINE Webhook URL 填
    `https://您的網域.ngrok-free.app/api/line/webhook`
 
+### 一鍵啟動與開機自動啟動（Windows）
+
+1. 在 `.env` 加一行：`NGROK_DOMAIN=您的網域.ngrok-free.app`
+2. 之後**雙擊專案裡的 `start-all.bat`** 即可同時啟動系統與 ngrok
+3. 要開機自動啟動：對 `start-all.bat` 按右鍵→建立捷徑，按 `Win+R` 輸入 `shell:startup` 開啟啟動資料夾，把捷徑放進去。之後主機開機就會自動上線
+4. 記得到 Windows「電源選項」把「睡眠」設為永不，否則電腦睡著系統就斷線
+
 注意：
 - 系統視窗與 ngrok 視窗都要保持開啟，電腦要保持開機
 - 免費版第一次用瀏覽器開啟時會出現 ngrok 的提示頁，按「Visit Site」即可（LINE webhook 不受影響）
