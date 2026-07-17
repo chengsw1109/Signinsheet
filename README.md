@@ -78,6 +78,24 @@ LINE 指令一覽（直接傳訊息給官方帳號）：
 
 未設定 LINE 金鑰時，系統照常運作，通知內容只會寫入伺服器 log（模擬模式），方便先行測試。
 
+## 用 ngrok 取得公開 HTTPS 網址（在自己電腦跑系統時）
+
+員工手機要連進系統、LINE 要送 webhook，都需要公開的 HTTPS 網址。系統跑在自己電腦時，可用 ngrok 免費建立固定網址：
+
+1. 到 <https://ngrok.com/> 註冊免費帳號
+2. 安裝 ngrok（Windows 可用 `winget install Ngrok.Ngrok`，或到官網下載）
+3. 在 ngrok 後台 Dashboard 複製您的 Authtoken，執行一次：`ngrok config add-authtoken 您的token`
+4. 在 ngrok 後台的 **Domains** 頁面領取一個免費固定網域（形如 `xxxx.ngrok-free.app`）
+5. 先啟動系統（`npm start`），再開**另一個**視窗執行：
+   `ngrok http --url=您的網域.ngrok-free.app 3000`
+6. 手機瀏覽器開 `https://您的網域.ngrok-free.app` 即可使用；LINE Webhook URL 填
+   `https://您的網域.ngrok-free.app/api/line/webhook`
+
+注意：
+- 系統視窗與 ngrok 視窗都要保持開啟，電腦要保持開機
+- 免費版第一次用瀏覽器開啟時會出現 ngrok 的提示頁，按「Visit Site」即可（LINE webhook 不受影響）
+- **系統公開上網後，務必先在 `.env` 更換 `ADMIN_PASSWORD`**
+
 ## 安全設計
 
 - 動態條碼內容為伺服器以 HMAC-SHA256 簽章的 token，含到期時間（60 秒）與一次性 nonce：
