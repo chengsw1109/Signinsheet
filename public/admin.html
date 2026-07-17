@@ -44,6 +44,7 @@
     <div class="card">
       <h2>出勤統計</h2>
       <div class="row">
+        <div><label>姓名／工號（留空＝全部人員）</label><input id="stat-q" placeholder="例：王小明 或 A001"></div>
         <div><label>日統計日期</label><input id="stat-date" type="date"></div>
         <div><button id="stat-daily-btn">查詢日統計</button></div>
         <div><label>月報表月份</label><input id="stat-month" type="month"></div>
@@ -152,9 +153,11 @@ const STATUS_BADGE = {
   absent: '<span class="badge off">未簽到</span>',
 };
 
+const statQuery = (extra) => new URLSearchParams({ ...extra, q: $('stat-q').value.trim() });
+
 async function loadDailyStats() {
-  const { date, rows } = await api('/api/admin/stats/daily?date=' + ($('stat-date').value || ''));
-  $('stat-daily-title').textContent = `日統計 ${date}`;
+  const { date, rows } = await api('/api/admin/stats/daily?' + statQuery({ date: $('stat-date').value || '' }));
+  $('stat-daily-title').textContent = `日統計 ${date}` + ($('stat-q').value.trim() ? `（篩選：${$('stat-q').value.trim()}）` : '');
   $('stat-daily-title').classList.remove('hidden');
   $('stat-daily-table').classList.remove('hidden');
   $('stat-daily-body').innerHTML = rows.map(r => `
@@ -170,8 +173,8 @@ async function loadDailyStats() {
 }
 
 async function loadMonthlyStats() {
-  const data = await api('/api/admin/stats/monthly?month=' + ($('stat-month').value || ''));
-  $('stat-month-title').textContent = `月報表 ${data.month}（已過工作日 ${data.workdays_elapsed} 天）`;
+  const data = await api('/api/admin/stats/monthly?' + statQuery({ month: $('stat-month').value || '' }));
+  $('stat-month-title').textContent = `月報表 ${data.month}（已過工作日 ${data.workdays_elapsed} 天）` + ($('stat-q').value.trim() ? `（篩選：${$('stat-q').value.trim()}）` : '');
   $('stat-month-title').classList.remove('hidden');
   $('stat-month-table').classList.remove('hidden');
   $('stat-month-body').innerHTML = data.rows.map(r => `
@@ -189,9 +192,10 @@ async function loadMonthlyStats() {
 $('stat-daily-btn').onclick = loadDailyStats;
 $('stat-month-btn').onclick = loadMonthlyStats;
 $('stat-csv-btn').onclick = () => {
-  const p = new URLSearchParams({ month: $('stat-month').value || '', session });
+  const p = statQuery({ month: $('stat-month').value || '', session });
   location.href = '/api/admin/stats/monthly.csv?' + p;
 };
+$('stat-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') loadDailyStats(); });
 
 async function loadPersons() {
   const { persons } = await api('/api/admin/persons');

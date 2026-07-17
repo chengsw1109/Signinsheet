@@ -245,19 +245,20 @@ app.get('/api/admin/records', requireAdmin, (req, res) => {
 // ---------- 出勤統計 ----------
 app.get('/api/admin/stats/daily', requireAdmin, (req, res) => {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : stats.localNow().date;
-  res.json({ date, work_start: stats.WORK_START, rows: stats.dailyDetail(date) });
+  const q = String(req.query.q || '').trim();
+  res.json({ date, work_start: stats.WORK_START, rows: stats.dailyDetail(date, q) });
 });
 
 app.get('/api/admin/stats/monthly', requireAdmin, (req, res) => {
   const month = /^\d{4}-\d{2}$/.test(req.query.month || '') ? req.query.month : stats.localNow().date.slice(0, 7);
-  res.json(stats.monthlyReport(month));
+  res.json(stats.monthlyReport(month, String(req.query.q || '').trim()));
 });
 
 app.get('/api/admin/stats/monthly.csv', (req, res) => {
   const s = db.prepare(`SELECT * FROM sessions WHERE token = ? AND kind = 'admin'`).get(req.query.session || '');
   if (!s || s.expires_at < nowIso()) return res.status(401).send('unauthorized');
   const month = /^\d{4}-\d{2}$/.test(req.query.month || '') ? req.query.month : stats.localNow().date.slice(0, 7);
-  const report = stats.monthlyReport(month);
+  const report = stats.monthlyReport(month, String(req.query.q || '').trim());
   const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const lines = [`月份,${month},已過工作日,${report.workdays_elapsed}`, '工號,姓名,部門,出勤天數,遲到次數,缺勤工作日,總工時(小時)'];
   for (const r of report.rows) {
