@@ -189,10 +189,15 @@ app.post('/api/admin/persons/:id/unbind-line', requireAdmin, (req, res) => {
 // ---------- LINE Webhook（好友加入、綁定指令）----------
 app.post('/api/line/webhook', (req, res) => {
   if (!line.verifySignature(req.rawBody, req.get('x-line-signature'))) {
+    console.error(`[LINE webhook] 簽章驗證失敗 — ${process.env.LINE_CHANNEL_SECRET
+      ? '請確認 .env 的 LINE_CHANNEL_SECRET 與 LINE Developers Console 顯示的 Channel secret 一致'
+      : '.env 尚未設定 LINE_CHANNEL_SECRET（或設定後未重啟系統）'}`);
     return res.status(403).send('signature verification failed');
   }
+  const events = (req.body && req.body.events) || [];
+  console.log(`[LINE webhook] 收到 ${events.length} 個事件${events.length ? '：' + events.map((e) => e.type).join(', ') : '（Verify 測試）'}`);
   res.sendStatus(200);
-  for (const ev of (req.body && req.body.events) || []) {
+  for (const ev of events) {
     notify.handleLineEvent(ev).catch((e) => console.error('LINE 事件處理失敗:', e));
   }
 });
@@ -295,6 +300,7 @@ app.use((err, req, res, next) => {
 
 if (require.main === module) {
   app.listen(PORT, () => console.log(`簽到退系統已啟動： http://localhost:${PORT}`));
+  console.log(`LINE 金鑰狀態：ACCESS_TOKEN ${process.env.LINE_CHANNEL_ACCESS_TOKEN ? '✅ 已設定' : '❌ 未設定'}、CHANNEL_SECRET ${process.env.LINE_CHANNEL_SECRET ? '✅ 已設定' : '❌ 未設定'}${fs.existsSync(path.join(__dirname, '.env')) ? '' : '（找不到 .env 檔）'}`);
   notify.startScheduler();
 }
 module.exports = app;
