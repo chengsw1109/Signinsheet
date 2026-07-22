@@ -182,6 +182,15 @@ app.post('/api/booking', async (req, res) => {
   res.json({ ok: true, booking: result.booking, service: { name: result.service.name } });
 });
 
+// 預約頁 QR Code（管理員產生，供列印張貼）
+app.get('/api/admin/booking/qr', requireAdmin, async (req, res) => {
+  const base = (process.env.PUBLIC_URL || '').replace(/\/$/, '') ||
+    `${req.get('x-forwarded-proto') || req.protocol}://${req.get('host')}`;
+  const url = `${base}/booking.html`;
+  const qr = await QRCode.toDataURL(url, { width: 480, margin: 2 });
+  res.json({ url, qr });
+});
+
 // ---------- 預約管理（需管理員登入）----------
 app.get('/api/admin/services', requireAdmin, (req, res) => {
   res.json({ services: booking.listServices(false) });

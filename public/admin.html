@@ -114,6 +114,17 @@
     </div>
 
     <div class="card">
+      <h2>預約 QR Code</h2>
+      <p class="muted">列印張貼在櫃台、名片或海報上，客戶用手機掃描即可進入預約頁。</p>
+      <div class="center">
+        <div class="qr-box"><img id="booking-qr" alt="預約 QR Code" style="max-width:280px"></div>
+        <div class="muted" id="booking-url"></div>
+        <button id="booking-qr-dl" class="secondary">下載 QR Code</button>
+        <button id="booking-qr-print" class="secondary">列印</button>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>服務項目（預約用）</h2>
       <div class="row">
         <div><label>服務名稱 *</label><input id="svc-name"></div>
@@ -206,7 +217,36 @@ function showMain() {
   loadBackupStatus();
   loadServices();
   loadBookings();
+  loadBookingQr();
 }
+
+let bookingQrData = '';
+async function loadBookingQr() {
+  try {
+    const { url, qr } = await api('/api/admin/booking/qr');
+    bookingQrData = qr;
+    $('booking-qr').src = qr;
+    $('booking-url').textContent = url;
+  } catch {}
+}
+
+$('booking-qr-dl').onclick = () => {
+  if (!bookingQrData) return;
+  const a = document.createElement('a');
+  a.href = bookingQrData;
+  a.download = 'booking-qrcode.png';
+  a.click();
+};
+
+$('booking-qr-print').onclick = () => {
+  if (!bookingQrData) return;
+  const w = window.open('');
+  w.document.write(`<div style="text-align:center;font-family:sans-serif;padding:40px">
+    <h1>線上預約</h1><p style="font-size:20px">請掃描 QR Code 進行預約</p>
+    <img src="${bookingQrData}" style="width:360px"><p>${$('booking-url').textContent}</p></div>`);
+  w.document.close();
+  w.print();
+};
 
 async function loadServices() {
   const { services } = await api('/api/admin/services');
