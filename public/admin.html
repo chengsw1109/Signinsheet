@@ -112,6 +112,39 @@
         </table>
       </div>
     </div>
+
+    <div class="card">
+      <h2>服務項目（預約用）</h2>
+      <div class="row">
+        <div><label>服務名稱 *</label><input id="svc-name"></div>
+        <div><label>時長（分鐘）</label><input id="svc-dur" type="number" value="60"></div>
+        <div><label>費用（元）</label><input id="svc-price" type="number" value="0"></div>
+        <div><button id="svc-add-btn">新增服務</button></div>
+      </div>
+      <div id="svc-msg" class="msg"></div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>服務</th><th>時長</th><th>費用</th><th>狀態</th><th>操作</th></tr></thead>
+          <tbody id="svc-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>預約記錄</h2>
+      <div class="row">
+        <div><label>起始日期</label><input id="bk-from" type="date"></div>
+        <div><label>結束日期</label><input id="bk-to" type="date"></div>
+        <div><button id="bk-query-btn">查詢</button></div>
+      </div>
+      <div id="bk-msg" class="msg"></div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>預約時間</th><th>服務</th><th>客戶</th><th>電話</th><th>Email</th><th>狀態</th><th>操作</th></tr></thead>
+          <tbody id="bk-body"></tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
   <p class="center"><a href="/">回首頁</a></p>
@@ -171,7 +204,67 @@ function showMain() {
   loadRecords();
   loadDailyStats();
   loadBackupStatus();
+  loadServices();
+  loadBookings();
 }
+
+async function loadServices() {
+  const { services } = await api('/api/admin/services');
+  $('svc-body').innerHTML = services.map(s => `
+    <tr>
+      <td>${escapeHtml(s.name)}</td>
+      <td>${s.duration_min} 分</td>
+      <td>${s.price ? s.price + ' 元' : '-'}</td>
+      <td><span class="badge ${s.active ? 'in' : 'off'}">${s.active ? '開放' : '停用'}</span></td>
+      <td><button class="small ${s.active ? 'danger' : ''}" onclick="toggleService(${s.id}, ${s.active ? 0 : 1}, '${escapeHtml(s.name)}', ${s.duration_min}, ${s.price})">${s.active ? '停用' : '開放'}</button></td>
+    </tr>`).join('') || '<tr><td colspan="5" class="muted">尚無服務，請先新增</td></tr>';
+}
+
+$('svc-add-btn').onclick = async () => {
+  const el = $('svc-msg'); el.className = 'msg'; el.textContent = '';
+  if (!$('svc-name').value.trim()) { el.className = 'msg err'; el.textContent = '請填寫服務名稱'; return; }
+  try {
+    await api('/api/admin/services', { method: 'POST', body: JSON.stringify({
+      name: $('svc-name').value, duration_min: Number($('svc-dur').value), price: Number($('svc-price').value) }) });
+    $('svc-name').value = ''; $('svc-dur').value = 60; $('svc-price').value = 0;
+    loadServices();
+  } catch (e) { el.className = 'msg err'; el.textContent = e.message; }
+};
+
+window.toggleService = async (id, active, name, dur, price) => {
+  try {
+    await api('/api/admin/services/' + id, { method: 'POST',
+      body: JSON.stringify({ name, duration_min: dur, price, active }) });
+    loadServices();
+  } catch (e) { $('svc-msg').className = 'msg err'; $('svc-msg').textContent = e.message; }
+};
+
+async function loadBookings() {
+  const p = new URLSearchParams();
+  if ($('bk-from').value) p.set('from', $('bk-from').value);
+  if ($('bk-to').value) p.set('to', $('bk-to').value);
+  const { bookings } = await api('/api/admin/bookings?' + p);
+  $('bk-body').innerHTML = bookings.map(b => `
+    <tr>
+      <td>${new Date(b.start_at).toLocaleString('zh-TW')}</td>
+      <td>${escapeHtml(b.service_name)}</td>
+      <td>${escapeHtml(b.customer_name)}</td>
+      <td>${escapeHtml(b.phone || '-')}</td>
+      <td>${escapeHtml(b.email || '-')}</td>
+      <td><span class="badge ${b.status === 'confirmed' ? 'in' : 'off'}">${b.status === 'confirmed' ? '已確認' : '已取消'}</span></td>
+      <td>${b.status === 'confirmed' ? `<button class="small danger" onclick="cancelBooking(${b.id})">取消</button>` : '-'}</td>
+    </tr>`).join('') || '<tr><td colspan="7" class="muted">查無預約</td></tr>';
+}
+
+$('bk-query-btn').onclick = loadBookings;
+
+window.cancelBooking = async (id) => {
+  if (!confirm('確定要取消這筆預約？系統會通知客戶並移除 Google 日曆活動。')) return;
+  try {
+    await api('/api/admin/bookings/' + id + '/cancel', { method: 'POST' });
+    loadBookings();
+  } catch (e) { $('bk-msg').className = 'msg err'; $('bk-msg').textContent = e.message; }
+};
 
 async function loadBackupStatus() {
   try {

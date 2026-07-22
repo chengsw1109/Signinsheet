@@ -3,7 +3,7 @@
 // 快取靜態資源加快載入；API 一律走網路（動態條碼不可快取）
 const CACHE = 'sis-v1';
 const ASSETS = [
-  '/', '/index.html', '/phone.html', '/scanner.html', '/admin.html',
+  '/', '/index.html', '/phone.html', '/scanner.html', '/admin.html', '/booking.html',
   '/style.css', '/manifest.webmanifest',
   '/icons/icon-180.png', '/icons/icon-192.png', '/icons/icon-512.png',
   '/vendor/html5-qrcode.min.js',

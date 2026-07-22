@@ -13,6 +13,9 @@ const line = require('./lib/line');
 const notify = require('./lib/notify');
 const stats = require('./lib/stats');
 const backup = require('./lib/backup');
+const booking = require('./lib/booking');
+const mailer = require('./lib/mailer');
+const gcal = require('./lib/gcal');
 
 const PORT = Number(process.env.PORT || 3000);
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
@@ -160,6 +163,45 @@ app.post('/api/scan', requireAdmin, (req, res) => {
     ok: true, action, scanned_at: scannedAt,
     person: { name: person.name, emp_no: person.emp_no, dept: person.dept },
   });
+});
+
+// ---------- 客戶預約（公開）----------
+app.get('/api/booking/services', (req, res) => {
+  res.json({ services: booking.listServices(true), config: booking.config() });
+});
+
+app.get('/api/booking/slots', (req, res) => {
+  const result = booking.availableSlots(Number(req.query.service_id), String(req.query.date || ''));
+  if (result.error) return res.status(400).json(result);
+  res.json(result);
+});
+
+app.post('/api/booking', async (req, res) => {
+  const result = await booking.createBooking(req.body || {});
+  if (result.error) return res.status(400).json(result);
+  res.json({ ok: true, booking: result.booking, service: { name: result.service.name } });
+});
+
+// ---------- 預約管理（需管理員登入）----------
+app.get('/api/admin/services', requireAdmin, (req, res) => {
+  res.json({ services: booking.listServices(false) });
+});
+app.post('/api/admin/services', requireAdmin, (req, res) => {
+  const { name } = req.body || {};
+  if (!String(name || '').trim()) return res.status(400).json({ error: '請填寫服務名稱' });
+  res.json({ id: booking.addService(req.body) });
+});
+app.post('/api/admin/services/:id', requireAdmin, (req, res) => {
+  booking.updateService(Number(req.params.id), req.body || {});
+  res.json({ ok: true });
+});
+app.get('/api/admin/bookings', requireAdmin, (req, res) => {
+  res.json({ bookings: booking.listBookings(req.query) });
+});
+app.post('/api/admin/bookings/:id/cancel', requireAdmin, async (req, res) => {
+  const r = await booking.cancelBooking(Number(req.params.id));
+  if (r.error) return res.status(400).json(r);
+  res.json(r);
 });
 
 // ---------- 管理端 ----------
@@ -348,6 +390,7 @@ app.use((err, req, res, next) => {
 if (require.main === module) {
   app.listen(PORT, () => console.log(`簽到退系統已啟動： http://localhost:${PORT}`));
   console.log(`LINE 金鑰狀態：ACCESS_TOKEN ${process.env.LINE_CHANNEL_ACCESS_TOKEN ? '✅ 已設定' : '❌ 未設定'}、CHANNEL_SECRET ${process.env.LINE_CHANNEL_SECRET ? '✅ 已設定' : '❌ 未設定'}${fs.existsSync(path.join(__dirname, '.env')) ? '' : '（找不到 .env 檔）'}`);
+  console.log(`預約通知管道：Email ${mailer.enabled() ? '✅ 已設定' : '（模擬模式）'}、Google 日曆 ${gcal.enabled() ? '✅ 已設定' : '（模擬模式）'}`);
   notify.startScheduler();
   backup.startScheduler();
 }

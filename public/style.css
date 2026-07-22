@@ -88,3 +88,6 @@ th { background: #f8fafc; color: var(--muted); font-weight: 600; }
 .scan-result.ok { background: #ecfdf5; border: 1px solid #a7f3d0; }
 .scan-result.err { background: #fef2f2; border: 1px solid #fecaca; }
 .hidden { display: none; }
+.slots { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.slot { margin: 0; padding: 8px 14px; background: #eef2ff; color: var(--primary-dark); border: 1px solid #c7d2fe; border-radius: 8px; }
+.slot:hover { background: var(--primary); color: #fff; }

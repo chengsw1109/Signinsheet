@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>線上預約</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#2563eb">
+<link rel="apple-touch-icon" href="/icons/icon-180.png">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+  <h1>線上預約</h1>
+
+  <div class="card">
+    <div id="steps">
+      <label>① 選擇服務</label>
+      <select id="service"></select>
+
+      <label>② 選擇日期</label>
+      <input id="date" type="date">
+
+      <label>③ 選擇時間</label>
+      <div id="slots" class="slots"><span class="muted">請先選擇服務與日期</span></div>
+    </div>
+  </div>
+
+  <div id="form-card" class="card hidden">
+    <h2>④ 填寫聯絡資料</h2>
+    <div class="muted" id="chosen"></div>
+    <label>姓名 *</label>
+    <input id="name">
+    <label>電話</label>
+    <input id="phone" inputmode="tel" placeholder="電話與 Email 至少填一項">
+    <label>Email</label>
+    <input id="email" inputmode="email" placeholder="填了會收到預約確認信">
+    <label>備註</label>
+    <input id="note" placeholder="有特殊需求可註明">
+    <button id="submit-btn">送出預約</button>
+    <button id="back-btn" class="secondary">重新選擇時間</button>
+    <div id="msg" class="msg"></div>
+  </div>
+
+  <div id="done-card" class="card hidden center">
+    <h2 class="ok">✅ 預約成功</h2>
+    <div id="done-detail"></div>
+    <button id="again-btn" class="secondary">再預約一筆</button>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const lineUserId = params.get('u') || '';
+let chosenStart = null, chosenLabel = '';
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+async function api(path, opts = {}) {
+  const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || '發生錯誤');
+  return data;
+}
+
+async function loadServices() {
+  const { services } = await api('/api/booking/services');
+  if (!services.length) {
+    $('service').innerHTML = '<option>目前尚無開放的服務</option>';
+    return;
+  }
+  $('service').innerHTML = services.map(s =>
+    `<option value="${s.id}">${escapeHtml(s.name)}（${s.duration_min} 分鐘${s.price ? '，' + s.price + ' 元' : ''}）</option>`).join('');
+  const today = new Date();
+  $('date').min = today.toLocaleDateString('sv-SE');
+  $('date').value = today.toLocaleDateString('sv-SE');
+  loadSlots();
+}
+
+async function loadSlots() {
+  const sid = $('service').value, date = $('date').value;
+  if (!sid || !date) return;
+  $('slots').innerHTML = '<span class="muted">查詢中…</span>';
+  try {
+    const data = await api(`/api/booking/slots?service_id=${sid}&date=${date}`);
+    if (!data.slots || !data.slots.length) {
+      $('slots').innerHTML = `<span class="muted">${data.reason || '當日已無可預約時段，請換一天'}</span>`;
+      return;
+    }
+    $('slots').innerHTML = data.slots.map(s =>
+      `<button type="button" class="slot" data-start="${s.start}" data-label="${s.label}">${s.label}</button>`).join('');
+    document.querySelectorAll('.slot').forEach(btn => btn.onclick = () => pickSlot(btn));
+  } catch (e) {
+    $('slots').innerHTML = `<span class="msg err">${escapeHtml(e.message)}</span>`;
+  }
+}
+
+function pickSlot(btn) {
+  chosenStart = btn.dataset.start;
+  chosenLabel = btn.dataset.label;
+  const svcText = $('service').options[$('service').selectedIndex].text;
+  $('chosen').textContent = `${svcText}｜${$('date').value} ${chosenLabel}`;
+  $('form-card').classList.remove('hidden');
+  $('form-card').scrollIntoView({ behavior: 'smooth' });
+}
+
+$('service').onchange = loadSlots;
+$('date').onchange = loadSlots;
+
+$('submit-btn').onclick = async () => {
+  $('msg').className = 'msg';
+  $('msg').textContent = '';
+  if (!$('name').value.trim()) { $('msg').className = 'msg err'; $('msg').textContent = '請填寫姓名'; return; }
+  try {
+    const data = await api('/api/booking', {
+      method: 'POST',
+      body: JSON.stringify({
+        service_id: Number($('service').value),
+        customer_name: $('name').value,
+        phone: $('phone').value,
+        email: $('email').value,
+        note: $('note').value,
+        line_user_id: lineUserId,
+        start: chosenStart,
+      }),
+    });
+    $('done-detail').innerHTML =
+      `<p>${escapeHtml(data.service.name)}<br>${$('date').value} ${chosenLabel}</p>
+       <p class="muted">${lineUserId ? '預約通知已發送到您的 LINE' : ($('email').value ? '預約確認信已寄出' : '請截圖保存本畫面')}</p>`;
+    $('steps').closest('.card').classList.add('hidden');
+    $('form-card').classList.add('hidden');
+    $('done-card').classList.remove('hidden');
+  } catch (e) {
+    $('msg').className = 'msg err';
+    $('msg').textContent = e.message;
+    loadSlots(); // 時段可能被搶走，重新整理
+  }
+};
+
+$('back-btn').onclick = () => { $('form-card').classList.add('hidden'); };
+$('again-btn').onclick = () => location.reload();
+
+loadServices();
+</script>
+</body>
+</html>
